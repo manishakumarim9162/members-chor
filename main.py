@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.types import ChannelParticipantsAdmins
+# NAYA IMPORT: Members add karne ke liye zaroori raw function
+from telethon.tl.functions.channels import InviteToChannelRequest
 from telethon.errors import UserPrivacyRestrictedError, FloodWaitError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -97,18 +99,22 @@ async def transfer_members_from_group(source_group_id):
 
             try:
                 print(f"⚙️ Adding user: {user.first_name} ({user.id})...")
-                await bot.invite_to_channel(MY_MAIN_GROUP, [user.id])
+                
+                # --- FIXED METHOD HERE ---
+                # Telethon me members add karne ka sahi tareeqa yeh hai:
+                await bot(InviteToChannelRequest(MY_MAIN_GROUP, [user.id]))
+                # -------------------------
                 
                 added_in_this_session += 1
                 update_count(source_group_id, group_name, current_count + added_in_this_session)
                 print(f"🎉 SUCCESS: [{group_name}] Added {user.first_name} ({current_count + added_in_this_session}/20)")
                 
-                # Speed control delay
+                # Speed control delay (15 seconds)
                 await asyncio.sleep(15)
 
             except UserPrivacyRestrictedError:
                 print(f"❌ PRIVACY SKIP: {user.first_name} ko add nahi kar sakte (Privacy Settings Restricted).")
-                await asyncio.sleep(2) # Chhota delay taaki bot lagatar fail na ho
+                await asyncio.sleep(2)
             except FloodWaitError as e:
                 print(f"⚠️ TELEGRAM LIMIT: {e.seconds} seconds ke liye bot block hua. Waiting...")
                 await asyncio.sleep(e.seconds)
@@ -124,7 +130,7 @@ async def transfer_members_from_group(source_group_id):
 async def handler(event):
     if event.user_added and event.user_id == (await bot.get_me()).id:
         if event.chat_id in processing_groups:
-            return # Agar pehle se chal raha hai toh skip karein
+            return
             
         permissions = await bot.get_permissions(event.chat_id, 'me')
         if permissions.is_admin:
@@ -174,4 +180,4 @@ async def main():
 
 if __name__ == '__main__':
     bot.loop.run_until_complete(main())
-  
+        
