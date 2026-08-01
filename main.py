@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.types import ChannelParticipantsAdmins
 from telethon.errors import UserPrivacyRestrictedError, FloodWaitError
-from apscheduler.schedulers.asyncio import AsyncioScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Environment variables load karein
 load_dotenv()
@@ -161,7 +161,7 @@ async def status_command(event):
     await event.respond(report)
 
 # SCHEDULER: Raat 12 baje limit reset
-scheduler = AsyncioScheduler()
+scheduler = AsyncIOScheduler()
 scheduler.add_job(reset_daily_limits, 'cron', hour=0, minute=0)
 scheduler.start()
 
