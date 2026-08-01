@@ -36,7 +36,7 @@ conn.commit()
 def get_today_count(group_id):
     cursor.execute("SELECT count FROM daily_limits WHERE group_id = ?", (group_id,))
     row = cursor.fetchone()
-    return row[0] if row else 0
+    return row if row else 0
 
 def update_count(group_id, group_name, new_count):
     cursor.execute("INSERT OR REPLACE INTO daily_limits (group_id, group_name, count) VALUES (?, ?, ?)", (group_id, group_name, new_count))
@@ -67,7 +67,6 @@ async def transfer_members_from_group(source_group_id):
 
     print(f"[{group_name}] se members nikalna shuru ho raha hai...")
     
-    # Admins/Owner nikalna taaki skip kiya ja sake
     admin_ids = set()
     try:
         async for admin in bot.iter_participants(source_group_id, filter=ChannelParticipantsAdmins):
@@ -87,7 +86,7 @@ async def transfer_members_from_group(source_group_id):
             
             if user.id in admin_ids:
                 print(f"Skipped Admin/Owner: {user.first_name}")
-                continue # Group admins/owner ko skip karein
+                continue
             
             if added_in_this_session >= max_to_add:
                 break
@@ -99,11 +98,10 @@ async def transfer_members_from_group(source_group_id):
                 update_count(source_group_id, group_name, current_count + added_in_this_session)
                 print(f"[{group_name}] Added: {user.first_name} ({current_count + added_in_this_session}/20)")
                 
-                # Telegram anti-spam ke liye safe delay (20 seconds)
                 await asyncio.sleep(20)
 
             except UserPrivacyRestrictedError:
-                pass # Privacy restricted users ko silently skip karein
+                pass 
             except FloodWaitError as e:
                 print(f"Telegram Limit! {e.seconds} seconds ke liye break.")
                 await asyncio.sleep(e.seconds)
@@ -126,7 +124,6 @@ async def handler(event):
 @bot.on(events.NewMessage(pattern='/start'))
 async def start_command(event):
     sender_id = event.sender_id
-    
     if sender_id == OWNER_ID:
         welcome_owner = (
             "👋 **Welcome Back, Boss!** 😎\n\n"
@@ -156,7 +153,6 @@ async def status_command(event):
 
     report = "📊 **Daily Transfer Status Report (IST):**\n\n"
     total_added_today = 0
-    
     for name, count, gid in rows:
         report += f"🔹 **{name}**\n   └ Added Today: `{count}/20`\n"
         total_added_today += count
@@ -164,12 +160,15 @@ async def status_command(event):
     report += f"\n📈 **Total Members Added Today:** `{total_added_today}`"
     await event.respond(report)
 
-# SCHEDULER: Indian Standard Time (IST) par raat 12:00 baje reset
-indian_tz = ZoneInfo("Asia/Kolkata")
-scheduler = AsyncIOScheduler(timezone=indian_tz)
-scheduler.add_job(reset_daily_limits, 'cron', hour=0, minute=0)
-scheduler.start()
+# MAIN ASYNC WRAPPER: Jo loop start hone ke baad scheduler chalayega
+async def main():
+    indian_tz = ZoneInfo("Asia/Kolkata")
+    scheduler = AsyncIOScheduler(timezone=indian_tz)
+    scheduler.add_job(reset_daily_limits, 'cron', hour=0, minute=0)
+    scheduler.start()
+    print("Bot safely running under Indian Time Zone... Press Ctrl+C to stop.")
+    await bot.run_until_disconnected()
 
-print("Bot safely running under Indian Time Zone... Press Ctrl+C to stop.")
-bot.run_until_disconnected()
-    
+if __name__ == '__main__':
+    # Telethon ke loop ke andar hi main logic ko run kar rahe hain
+    bot.loop.run_until_complete(main())
